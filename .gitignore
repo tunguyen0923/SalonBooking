@@ -1,0 +1,8 @@
+target/
+*.class
+.idea/
+*.iml
+*.log
+.DS_Store
+http-client.env.json
+SalonBooking.postman_environment.json

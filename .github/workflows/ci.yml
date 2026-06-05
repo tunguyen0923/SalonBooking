@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Cache Maven
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-m2-
+
+      - name: Ensure AI_SYSTEM_RULES.md exists
+        run: |
+          if [ ! -f docs/AI_SYSTEM_RULES.md ]; then
+            echo "Missing docs/AI_SYSTEM_RULES.md - please add the AI system rules file." >&2
+            exit 1
+          fi
+
+      - name: Build (skip tests)
+        run: mvn -B -DskipTests package
+
