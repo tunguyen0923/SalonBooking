@@ -1,70 +1,68 @@
 # SalonBooking — Backend
 
-This repository is a Spring Boot backend for a salon scheduling system.
+This repository is a multi-tenant SaaS backend for nail salons, built with Spring Boot and PostgreSQL.
 
-Documentation and developer references are in the `docs/` folder:
+## Documentation
 
-- `docs/COPILOT_GUIDE.md` — Copilot development guide and rules
-- `docs/DOMAIN_MODEL.md` — Domain model and core entities
-- `docs/ARCHITECTURE_AND_STANDARDS.md` — Architecture and coding standards
-Additional reference docs:
+Developer references and architecture details:
 
-- `docs/AI_SYSTEM_RULES.md` — AI system rules / Copilot operating system (most important)
-- `docs/DOMAIN_GUIDE.md` — Domain guide: how the system thinks
-- `docs/CODE_PATTERNS.md` — Code patterns and examples for services, controllers, events
+- `docs/ARCHITECTURE_AND_STANDARDS.md` — Core architecture, coding standards, and deletion policy.
+- `docs/DOMAIN_MODEL.md` — Domain model and core entities.
+- `docs/CODE_PATTERNS.md` — Implementation patterns for controllers and services.
+- `docs/AI_SYSTEM_RULES.md` — Guidelines for AI-assisted development.
 
-Follow these docs as the canonical references when contributing or when Copilot generates code.
+## Getting Started
 
-How to run Phase 1 locally
+### Prerequisites
+- Java 21
+- Docker & Docker Compose
+- Maven
 
-1. Start Postgres with Docker Compose:
+### Running Locally
 
-```bash
-docker compose up -d
-```
+1. **Start Infrastructure**:
+   ```bash
+   docker compose up -d
+   ```
 
-2. Build and run the app:
+2. **Run Application**:
+   ```bash
+   mvn spring-boot:run
+   ```
 
-```bash
-mvn spring-boot:run
-```
+3. **API Documentation**:
+   Access Swagger UI at [http://localhost:8080/swagger-ui.html](http://localhost:8080/swagger-ui.html)
 
-3. API docs: http://localhost:8080/swagger-ui.html
+## Project Status
 
-Notes:
-- Update `src/main/resources/application.properties` to change DB or JWT secret for production.
-- Flyway will run migrations from `src/main/resources/db/migration`.
+### ✅ Phase 1: Foundation (Complete)
+- **Authentication**: JWT-based auth with HS256 and BCrypt password hashing.
+- **Multi-Tenancy**: Architecture designed for `salonId` isolation from the start.
+- **Security**: Hardened filter chain, typed `UserPrincipal`, and `SecurityUtil` for context extraction.
+- **Infrastructure**: Flyway migrations, PostgreSQL integration, and Global Exception Handling.
 
-## Phase 1 Status (After Remediation)
+### ✅ Phase 2: Core Scheduling (Complete)
+- **Service Catalog**: Management of salon services with duration and price rules.
+- **Technician Management**: Technician records with active/inactive status.
+- **Customer Management**: CRM for salon clients with contact validation.
+- **Appointment Engine**:
+    - **Automated Scheduling**: System-calculated `endTime` based on service durations.
+    - **Double-Booking Prevention**: Conflict detection for technicians (409 Conflict).
+    - **Historical Integrity**: Snapshot of price and duration at the time of booking.
+- **Soft-Delete Policy**: Implementation of `active` flags across all modules to preserve data integrity.
 
-✅ REMEDIATED (5-step security hardening complete):
+## Architecture Highlights
 
-1. **JWT Principal & Role Mapping** — UserPrincipal class created with GrantedAuthority mapping. JwtFilter now extracts claims correctly and sets typed principal with ROLE_* authorities.
-2. **DTO Exposure Fixed** — SalonResponse DTO created. Controller no longer returns JPA entities.
-3. **Role Enforcement Ready** — @EnableMethodSecurity enabled in SecurityConfig. SecurityUtil helper added for easy salonId/userId/role extraction from context.
-4. **DB Hardening** — V2 Flyway migration adds NOT NULL, UNIQUE(email,salon_id), and index on (salon_id, email).
-5. **Exception Mapping** — Custom exceptions (BadRequestException, NotFoundException, UnauthorizedException, ConflictException) mapped to 400/401/404/409 responses.
+- **Modular Monolith**: Domain-based package structure (`service_catalog`, `technician`, `appointment`, etc.).
+- **Strict Layering**: Controller → Service → Repository flow.
+- **DTO-Only API**: No JPA entities are exposed through the REST interface.
+- **Tenant Isolation**: `salonId` is derived strictly from JWT claims; cross-tenant access is prevented at the service layer.
+- **Flyway Migrations**: Versioned schema updates for predictable deployments.
 
-## Architecture Notes
+## Testing
 
-Clean Layering:
-- Controller → Service → Repository (enforced)
-- DTOs for all request/response (no entity exposure)
-- Business logic in service (register, login, validation)
-- Constructor injection, final fields throughout
+A Postman collection is provided in the root directory:
+- `SalonBooking.postman_collection.json`
+- `SalonBooking.postman_environment.json`
 
-Security:
-- JWT with HS256, 24h expiration
-- BCrypt password hashing
-- Typed UserPrincipal for context extraction
-- Role-based authorities for @PreAuthorize support
-- Endpoint protection (all except /auth/** require token)
-
-Multi-Tenancy Ready:
-- SecurityContext carries salonId + userId (can be extracted via SecurityUtil)
-- Repositories ready for salonId filtering (future: use TenantContext or JPA filter)
-
-
-Note: I used the repository patch tool correctly in this change to demonstrate the fix for the earlier "Missing patch text" error.
-
-
+Import both into Postman and select the `SalonBooking-Local` environment to begin testing.
