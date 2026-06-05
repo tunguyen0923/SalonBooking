@@ -61,8 +61,8 @@ Developer references and architecture details:
 
 ## Testing
 
-A Postman collection is provided in the root directory:
-- `SalonBooking.postman_collection.json`
-- `SalonBooking.postman_environment.json`
+A Postman collection is provided in the `postman/` directory:
+- `postman/SalonBooking.postman_collection.json`
+- `postman/SalonBooking.postman_environment.json`
 
 Import both into Postman and select the `SalonBooking-Local` environment to begin testing.
