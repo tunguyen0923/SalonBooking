@@ -5,15 +5,25 @@ import com.salon.appointment.dto.AppointmentResponse;
 import com.salon.appointment.entity.Appointment;
 import com.salon.appointment.entity.AppointmentServiceItem;
 import com.salon.appointment.entity.AppointmentStatus;
+import com.salon.appointment.event.AppointmentCancelledEvent;
+import com.salon.appointment.event.AppointmentCreatedEvent;
+import com.salon.appointment.event.AppointmentRescheduledEvent;
 import com.salon.appointment.mapper.AppointmentMapper;
 import com.salon.appointment.repository.AppointmentRepository;
+import com.salon.common.event.DomainEventPublisher;
 import com.salon.common.exception.ConflictException;
 import com.salon.common.exception.NotFoundException;
 import com.salon.common.security.SecurityUtil;
+import com.salon.customer.entity.Customer;
 import com.salon.customer.repository.CustomerRepository;
+import com.salon.salon.entity.Salon;
+import com.salon.salon.repository.SalonRepository;
 import com.salon.service_catalog.entity.ServiceOffering;
 import com.salon.service_catalog.repository.ServiceOfferingRepository;
+import com.salon.technician.entity.Technician;
 import com.salon.technician.repository.TechnicianRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,22 +34,30 @@ import java.util.stream.Collectors;
 @Service
 public class AppointmentService {
 
+    private static final Logger log = LoggerFactory.getLogger(AppointmentService.class);
+
     private final AppointmentRepository repository;
     private final CustomerRepository customerRepository;
     private final TechnicianRepository technicianRepository;
     private final ServiceOfferingRepository serviceRepository;
+    private final SalonRepository salonRepository;
     private final AppointmentMapper mapper;
+    private final DomainEventPublisher eventPublisher;
 
     public AppointmentService(AppointmentRepository repository,
                               CustomerRepository customerRepository,
                               TechnicianRepository technicianRepository,
                               ServiceOfferingRepository serviceRepository,
-                              AppointmentMapper mapper) {
+                              SalonRepository salonRepository,
+                              AppointmentMapper mapper,
+                              DomainEventPublisher eventPublisher) {
         this.repository = repository;
         this.customerRepository = customerRepository;
         this.technicianRepository = technicianRepository;
         this.serviceRepository = serviceRepository;
+        this.salonRepository = salonRepository;
         this.mapper = mapper;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -47,11 +65,11 @@ public class AppointmentService {
         Long salonId = SecurityUtil.getCurrentSalonId();
 
         // 1. Validate Customer
-        customerRepository.findByIdAndSalonIdAndActiveTrue(request.getCustomerId(), salonId)
+        Customer customer = customerRepository.findByIdAndSalonIdAndActiveTrue(request.getCustomerId(), salonId)
                 .orElseThrow(() -> new NotFoundException("Customer not found or does not belong to your salon"));
 
         // 2. Validate Technician
-        technicianRepository.findByIdAndSalonIdAndActiveTrue(request.getTechnicianId(), salonId)
+        Technician technician = technicianRepository.findByIdAndSalonIdAndActiveTrue(request.getTechnicianId(), salonId)
                 .orElseThrow(() -> new NotFoundException("Technician not found or does not belong to your salon"));
 
         // 3. Validate Services and Calculate Duration
@@ -82,7 +100,30 @@ public class AppointmentService {
         
         appointment.getServices().addAll(serviceItems);
         
-        return mapper.toResponse(repository.save(appointment));
+        Appointment saved = repository.save(appointment);
+        
+        // Fetch Salon details
+        Salon salon = salonRepository.findById(salonId).orElse(null);
+        String salonName = salon != null ? salon.getName() : "Our Salon";
+        
+        // Publish Event
+        log.info("Publishing AppointmentCreatedEvent for appointment: {}", saved.getId());
+        eventPublisher.publish(new AppointmentCreatedEvent(
+                saved.getId(),
+                saved.getSalonId(),
+                salonName,
+                customer.getId(),
+                customer.getName(),
+                customer.getEmail(),
+                technician.getId(),
+                technician.getName(),
+                technician.getEmail(),
+                saved.getStartTime(),
+                saved.getEndTime(),
+                services.stream().map(ServiceOffering::getName).collect(Collectors.toList())
+        ));
+        
+        return mapper.toResponse(saved);
     }
 
     @Transactional(readOnly = true)
@@ -102,12 +143,34 @@ public class AppointmentService {
     public AppointmentResponse cancelAppointment(Long id) {
         Appointment appointment = getByIdForCurrentSalon(id);
         appointment.setStatus(AppointmentStatus.CANCELLED);
-        return mapper.toResponse(repository.save(appointment));
+        Appointment saved = repository.save(appointment);
+
+        // Fetch details for event
+        Customer customer = customerRepository.findById(saved.getCustomerId()).orElse(null);
+        Technician technician = technicianRepository.findById(saved.getTechnicianId()).orElse(null);
+        Salon salon = salonRepository.findById(saved.getSalonId()).orElse(null);
+        String salonName = salon != null ? salon.getName() : "Our Salon";
+
+        log.info("Publishing AppointmentCancelledEvent for appointment: {}", saved.getId());
+        eventPublisher.publish(new AppointmentCancelledEvent(
+                saved.getId(),
+                saved.getSalonId(),
+                salonName,
+                saved.getCustomerId(),
+                customer != null ? customer.getName() : "Unknown",
+                customer != null ? customer.getEmail() : null,
+                saved.getTechnicianId(),
+                technician != null ? technician.getName() : "Unknown",
+                technician != null ? technician.getEmail() : null
+        ));
+
+        return mapper.toResponse(saved);
     }
 
     @Transactional
     public AppointmentResponse rescheduleAppointment(Long id, LocalDateTime newStartTime) {
         Appointment appointment = getByIdForCurrentSalon(id);
+        LocalDateTime oldStartTime = appointment.getStartTime();
         
         int totalDuration = appointment.getServices().stream()
                 .mapToInt(AppointmentServiceItem::getDurationSnapshot)
@@ -120,7 +183,31 @@ public class AppointmentService {
         appointment.setEndTime(newEndTime);
         appointment.setStatus(AppointmentStatus.BOOKED); // Reset status to booked on reschedule?
         
-        return mapper.toResponse(repository.save(appointment));
+        Appointment saved = repository.save(appointment);
+
+        // Fetch details for event
+        Customer customer = customerRepository.findById(saved.getCustomerId()).orElse(null);
+        Technician technician = technicianRepository.findById(saved.getTechnicianId()).orElse(null);
+        Salon salon = salonRepository.findById(saved.getSalonId()).orElse(null);
+        String salonName = salon != null ? salon.getName() : "Our Salon";
+
+        log.info("Publishing AppointmentRescheduledEvent for appointment: {}", saved.getId());
+        eventPublisher.publish(new AppointmentRescheduledEvent(
+                saved.getId(),
+                saved.getSalonId(),
+                salonName,
+                saved.getCustomerId(),
+                customer != null ? customer.getName() : "Unknown",
+                customer != null ? customer.getEmail() : null,
+                saved.getTechnicianId(),
+                technician != null ? technician.getName() : "Unknown",
+                technician != null ? technician.getEmail() : null,
+                oldStartTime,
+                saved.getStartTime(),
+                saved.getEndTime()
+        ));
+        
+        return mapper.toResponse(saved);
     }
 
     private Appointment getByIdForCurrentSalon(Long id) {
